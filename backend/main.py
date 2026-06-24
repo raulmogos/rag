@@ -5,6 +5,7 @@ import sys
 
 from rag.agent import MainAgent
 from rag.bootstrap import AgentBootstrapError, build_agent_runtime
+from rag.chat_history import ChatHistoryStore
 from rag.config import Settings
 
 
@@ -29,14 +30,17 @@ async def run() -> int:
     args = parser.parse_args()
 
     settings = Settings.from_env()
+    chat_history = ChatHistoryStore(settings.database_url)
+    await chat_history.connect()
 
     try:
         llm, tools, model, tool_count = await build_agent_runtime(settings, args.model)
     except AgentBootstrapError as exc:
+        await chat_history.close()
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    agent = MainAgent(llm=llm, tools=tools)
+    agent = MainAgent(llm=llm, tools=tools, chat_history=chat_history)
     print(f"Connected to LM Studio model: {model}")
     print(f"Loaded {tool_count} tools (including MCP server tools)\n")
 
@@ -62,6 +66,7 @@ async def run() -> int:
         except Exception as exc:
             print(f"Agent error: {exc}\n", file=sys.stderr)
 
+    await chat_history.close()
     return 0
 
 

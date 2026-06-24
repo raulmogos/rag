@@ -13,6 +13,7 @@ class Settings:
     model: str | None
     mcp_url: str
     playwright_mcp_url: str | None
+    database_url: str
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -25,10 +26,16 @@ class Settings:
 
         playwright_mcp_url = os.getenv("PLAYWRIGHT_MCP_URL") or None
 
+        database_url = os.getenv(
+            "DATABASE_URL",
+            "postgresql://rag:rag@localhost:5432/rag",
+        )
+
         return cls(
             base_url=os.getenv("LMSTUDIO_BASE_URL", "http://localhost:1234/v1"),
             api_key=os.getenv("LMSTUDIO_API_KEY", "lm-studio"),
             model=os.getenv("LMSTUDIO_MODEL") or None,
             mcp_url=mcp_url,
             playwright_mcp_url=playwright_mcp_url,
+            database_url=database_url,
         )

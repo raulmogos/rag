@@ -22,10 +22,46 @@ export type ResetResponse = {
   session_id: string;
 };
 
+export type SessionSummary = {
+  session_id: string;
+  title: string;
+  message_count: number;
+  started_at: string;
+  updated_at: string;
+};
+
+export type SessionHistory = {
+  session_id: string;
+  messages: Array<{
+    id: string;
+    role: string;
+    content: string;
+    created_at: string;
+  }>;
+};
+
 export async function fetchHealth(): Promise<HealthResponse> {
   const response = await fetch("/api/health");
   if (!response.ok) {
     throw new Error("Backend is unavailable.");
+  }
+  return response.json();
+}
+
+export async function fetchSessions(): Promise<SessionSummary[]> {
+  const response = await fetch("/api/sessions");
+  if (!response.ok) {
+    throw new Error("Failed to load chat history.");
+  }
+  return response.json();
+}
+
+export async function fetchSessionHistory(
+  sessionId: string,
+): Promise<SessionHistory> {
+  const response = await fetch(`/api/sessions/${sessionId}`);
+  if (!response.ok) {
+    throw new Error("Failed to load session.");
   }
   return response.json();
 }

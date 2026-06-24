@@ -6,6 +6,7 @@ from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import InMemorySaver
 
+from rag.chat_history import ChatHistoryStore
 from rag.tools import AGENT_TOOLS
 
 DEFAULT_SYSTEM_PROMPT = """You are a helpful assistant running locally via LM Studio.
@@ -45,7 +46,10 @@ class MainAgent:
         tools: list[BaseTool] | None = None,
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
         thread_id: str | None = None,
+        chat_history: ChatHistoryStore | None = None,
     ) -> None:
+        self.chat_history = chat_history
+        self._history_loaded = False
         self.checkpointer = InMemorySaver()
         self.thread_id = thread_id or str(uuid.uuid4())
         self.graph = create_agent(
@@ -65,9 +69,33 @@ class MainAgent:
         )
         return _extract_response(result["messages"])
 
+    def _messages_from_db(self, rows: list[dict[str, str]]) -> list:
+        messages = []
+        for row in rows:
+            if row["role"] == "user":
+                messages.append(HumanMessage(content=row["content"]))
+            elif row["role"] == "assistant":
+                messages.append(AIMessage(content=row["content"]))
+        return messages
+
     async def achat(self, user_message: str) -> str:
+        if self.chat_history is not None:
+            await self.chat_history.save(self.thread_id, "user", user_message)
+
+        if self.chat_history is not None and not self._history_loaded:
+            rows = await self.chat_history.get_messages(self.thread_id)
+            invoke_messages = self._messages_from_db(rows)
+            self._history_loaded = True
+        else:
+            invoke_messages = [HumanMessage(content=user_message)]
+
         result = await self.graph.ainvoke(
-            {"messages": [HumanMessage(content=user_message)]},
+            {"messages": invoke_messages},
             config={"configurable": {"thread_id": self.thread_id}},
         )
-        return _extract_response(result["messages"])
+        reply = _extract_response(result["messages"])
+
+        if self.chat_history is not None:
+            await self.chat_history.save(self.thread_id, "assistant", reply)
+
+        return reply

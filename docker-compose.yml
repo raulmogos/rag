@@ -1,4 +1,30 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-rag}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rag}
+      POSTGRES_DB: ${POSTGRES_DB:-rag}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rag} -d ${POSTGRES_DB:-rag}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  adminer:
+    image: adminer:4
+    ports:
+      - "${ADMINER_PORT:-8081}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
   mcp:
     build:
       context: ./backend
@@ -31,10 +57,13 @@ services:
       LMSTUDIO_MODEL: ${LMSTUDIO_MODEL:-}
       LOCAL_LATITUDE: ${LOCAL_LATITUDE:-}
       LOCAL_LONGITUDE: ${LOCAL_LONGITUDE:-}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-rag}:${POSTGRES_PASSWORD:-rag}@postgres:5432/${POSTGRES_DB:-rag}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}
     ports:
       - "${API_PORT:-8001}:8001"
     depends_on:
+      postgres:
+        condition: service_healthy
       mcp:
         condition: service_started
       playwright-mcp:
@@ -52,3 +81,6 @@ services:
       api:
         condition: service_started
     restart: unless-stopped
+
+volumes:
+  postgres_data:
