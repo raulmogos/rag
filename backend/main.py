@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 import argparse
+import asyncio
 import sys
 
-import httpx
-
 from rag.agent import MainAgent
+from rag.bootstrap import AgentBootstrapError, build_agent_runtime
 from rag.config import Settings
-from rag.lmstudio import create_chat_model, resolve_model
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -25,30 +24,24 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> int:
+async def run() -> int:
     parser = build_parser()
     args = parser.parse_args()
 
     settings = Settings.from_env()
 
     try:
-        model = resolve_model(settings, args.model or settings.model)
-    except RuntimeError as exc:
+        llm, tools, model, tool_count = await build_agent_runtime(settings, args.model)
+    except AgentBootstrapError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
-    except httpx.HTTPError as exc:
-        print(
-            f"Error: could not reach LM Studio at {settings.base_url} ({exc})",
-            file=sys.stderr,
-        )
-        return 1
 
-    llm = create_chat_model(settings, model)
-    agent = MainAgent(llm=llm)
+    agent = MainAgent(llm=llm, tools=tools)
     print(f"Connected to LM Studio model: {model}")
+    print(f"Loaded {tool_count} tools (including MCP server tools)\n")
 
     if args.prompt:
-        print(agent.chat(args.prompt))
+        print(await agent.achat(args.prompt))
         return 0
 
     print("Interactive mode. Type 'exit' or 'quit' to stop.\n")
@@ -65,11 +58,15 @@ def main() -> int:
             break
 
         try:
-            print(f"Agent: {agent.chat(user_input)}\n")
+            print(f"Agent: {await agent.achat(user_input)}\n")
         except Exception as exc:
             print(f"Agent error: {exc}\n", file=sys.stderr)
 
     return 0
+
+
+def main() -> int:
+    return asyncio.run(run())
 
 
 if __name__ == "__main__":

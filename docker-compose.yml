@@ -1,0 +1,54 @@
+services:
+  mcp:
+    build:
+      context: ./backend
+    command: python mcp/server.py
+    environment:
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: 8000
+    ports:
+      - "${MCP_PORT:-8000}:8000"
+    restart: unless-stopped
+
+  playwright-mcp:
+    build:
+      context: ./playwright-mcp
+    init: true
+    ports:
+      - "${PLAYWRIGHT_MCP_PORT:-8931}:8931"
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ./backend
+    command: uvicorn api:app --host 0.0.0.0 --port 8001
+    environment:
+      MCP_HOST: mcp
+      MCP_PORT: 8000
+      PLAYWRIGHT_MCP_URL: ${PLAYWRIGHT_MCP_URL:-http://playwright-mcp:8931/mcp}
+      LMSTUDIO_BASE_URL: ${LMSTUDIO_BASE_URL:-http://host.docker.internal:1234/v1}
+      LMSTUDIO_API_KEY: ${LMSTUDIO_API_KEY:-lm-studio}
+      LMSTUDIO_MODEL: ${LMSTUDIO_MODEL:-}
+      LOCAL_LATITUDE: ${LOCAL_LATITUDE:-}
+      LOCAL_LONGITUDE: ${LOCAL_LONGITUDE:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}
+    ports:
+      - "${API_PORT:-8001}:8001"
+    depends_on:
+      mcp:
+        condition: service_started
+      playwright-mcp:
+        condition: service_started
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
+    depends_on:
+      api:
+        condition: service_started
+    restart: unless-stopped
