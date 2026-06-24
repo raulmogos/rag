@@ -16,10 +16,21 @@ services:
       retries: 10
     restart: unless-stopped
 
-  adminer:
-    image: adminer:4
+  dbgate:
+    image: dbgate/dbgate
     ports:
-      - "${ADMINER_PORT:-8081}:8080"
+      - "${DBGATE_PORT:-8081}:3000"
+    volumes:
+      - dbgate_data:/root/.dbgate
+    environment:
+      CONNECTIONS: rag
+      LABEL_rag: RAG Postgres
+      SERVER_rag: postgres
+      USER_rag: ${POSTGRES_USER:-rag}
+      PASSWORD_rag: ${POSTGRES_PASSWORD:-rag}
+      PORT_rag: 5432
+      DATABASE_rag: ${POSTGRES_DB:-rag}
+      ENGINE_rag: postgres@dbgate-plugin-postgres
     depends_on:
       postgres:
         condition: service_healthy
@@ -84,3 +95,4 @@ services:
 
 volumes:
   postgres_data:
+  dbgate_data:

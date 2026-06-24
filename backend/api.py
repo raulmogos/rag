@@ -177,6 +177,19 @@ async def get_session_history(session_id: str) -> SessionHistoryResponse:
     )
 
 
+@app.delete("/api/sessions/{session_id}")
+async def delete_session(session_id: str) -> dict[str, str]:
+    if chat_history is None:
+        raise HTTPException(status_code=503, detail="Chat history is not ready.")
+
+    deleted = await chat_history.delete_session(session_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Session not found.")
+
+    sessions.pop(session_id, None)
+    return {"status": "deleted", "session_id": session_id}
+
+
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(payload: ChatRequest) -> ChatResponse:
     agent, session_id = _get_or_create_agent(payload.session_id)

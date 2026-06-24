@@ -66,6 +66,17 @@ export async function fetchSessionHistory(
   return response.json();
 }
 
+export async function deleteSession(sessionId: string): Promise<void> {
+  const response = await fetch(`/api/sessions/${sessionId}`, {
+    method: "DELETE",
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.detail ?? "Failed to delete chat.");
+  }
+}
+
 export async function sendMessage(
   message: string,
   sessionId: string | null,

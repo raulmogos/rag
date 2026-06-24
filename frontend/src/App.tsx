@@ -8,13 +8,13 @@ import {
   Container,
   Group,
   Loader,
+  NavLink,
   Paper,
   ScrollArea,
   Stack,
   Text,
   Textarea,
   Title,
-  UnstyledButton,
 } from "@mantine/core";
 import {
   IconAlertCircle,
@@ -22,9 +22,11 @@ import {
   IconPlus,
   IconRobot,
   IconSend,
+  IconTrash,
   IconUser,
 } from "@tabler/icons-react";
 import {
+  deleteSession,
   fetchHealth,
   fetchSessionHistory,
   fetchSessions,
@@ -211,6 +213,32 @@ export default function App() {
     }
   }
 
+  async function handleDeleteSession(
+    event: React.MouseEvent,
+    id: string,
+  ) {
+    event.stopPropagation();
+    if (loading) {
+      return;
+    }
+
+    try {
+      await deleteSession(id);
+      if (sessionId === id) {
+        setSessionId(null);
+        setMessages([]);
+      }
+      await refreshSessions();
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Could not delete chat.";
+      setMessages((current) => [
+        ...current,
+        { id: createId(), role: "error", content: message },
+      ]);
+    }
+  }
+
   return (
     <Box
       mih="100vh"
@@ -268,55 +296,93 @@ export default function App() {
               radius="xl"
               p="md"
               w={280}
-              style={{ flexShrink: 0, display: "flex" }}
+              style={{
+                flexShrink: 0,
+                display: "flex",
+                flexDirection: "column",
+                overflow: "hidden",
+                minHeight: 420,
+              }}
             >
-              <Stack gap="sm" style={{ flex: 1, minHeight: 420 }}>
-                <Text size="sm" fw={700}>
-                  Chat history
-                </Text>
-                <ScrollArea style={{ flex: 1 }}>
-                  {loadingSessions ? (
-                    <Group justify="center" py="xl">
-                      <Loader size="sm" />
-                    </Group>
-                  ) : sessions.length === 0 ? (
-                    <Text size="sm" c="dimmed">
-                      No past chats yet.
-                    </Text>
-                  ) : (
-                    <Stack gap="xs" pr="xs">
-                      {sessions.map((session) => (
-                        <UnstyledButton
+              <Text size="sm" fw={700} mb="xs">
+                Chat history
+              </Text>
+              <ScrollArea
+                flex={1}
+                type="scroll"
+                scrollbars="y"
+                offsetScrollbars
+                scrollbarSize={6}
+              >
+                {loadingSessions ? (
+                  <Group justify="center" py="xl">
+                    <Loader size="sm" />
+                  </Group>
+                ) : sessions.length === 0 ? (
+                  <Text size="sm" c="dimmed">
+                    No past chats yet.
+                  </Text>
+                ) : (
+                  <Stack gap={4}>
+                    {sessions.map((session) => {
+                      const isActive = session.session_id === sessionId;
+
+                      return (
+                        <NavLink
                           key={session.session_id}
-                          onClick={() => handleSelectSession(session.session_id)}
-                          style={{ width: "100%" }}
-                        >
-                          <Paper
-                            withBorder
-                            p="sm"
-                            radius="md"
-                            bg={
-                              session.session_id === sessionId
-                                ? "indigo.0"
-                                : "white"
-                            }
-                          >
-                            <Text size="sm" fw={600} lineClamp={2}>
-                              {session.title}
-                            </Text>
-                            <Text size="xs" c="dimmed" mt={4}>
-                              {session.message_count} messages
-                            </Text>
-                            <Text size="xs" c="dimmed">
-                              {formatWhen(session.updated_at)}
-                            </Text>
-                          </Paper>
-                        </UnstyledButton>
-                      ))}
-                    </Stack>
-                  )}
-                </ScrollArea>
-              </Stack>
+                          label={session.title}
+                          description={`${session.message_count} messages · ${formatWhen(session.updated_at)}`}
+                          active={isActive}
+                          variant="light"
+                          color="indigo"
+                          disabled={loading}
+                          onClick={() =>
+                            handleSelectSession(session.session_id)
+                          }
+                          rightSection={
+                            <ActionIcon
+                              variant="subtle"
+                              color="red"
+                              size="sm"
+                              aria-label="Delete chat"
+                              onClick={(event) =>
+                                handleDeleteSession(event, session.session_id)
+                              }
+                            >
+                              <IconTrash size={15} />
+                            </ActionIcon>
+                          }
+                          styles={{
+                            root: {
+                              borderRadius: "var(--mantine-radius-md)",
+                              paddingInline: 0,
+                              paddingBlock: "var(--mantine-spacing-xs)",
+                            },
+                            body: {
+                              flex: 1,
+                              minWidth: 0,
+                            },
+                            label: {
+                              fontSize: "var(--mantine-font-size-sm)",
+                              fontWeight: 600,
+                              lineClamp: 2,
+                              whiteSpace: "normal",
+                            },
+                            description: {
+                              fontSize: "var(--mantine-font-size-xs)",
+                              lineClamp: 1,
+                            },
+                            section: {
+                              marginInlineStart: "var(--mantine-spacing-xs)",
+                              alignSelf: "center",
+                            },
+                          }}
+                        />
+                      );
+                    })}
+                  </Stack>
+                )}
+              </ScrollArea>
             </Paper>
 
             <Stack gap="md" style={{ flex: 1, minWidth: 0 }}>

@@ -1,17 +1,9 @@
-import psycopg
+import uuid
 
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS chat_history (
-    id SERIAL PRIMARY KEY,
-    session_id UUID NOT NULL,
-    role TEXT NOT NULL,
-    content TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+from sqlalchemy import delete, func, select
 
-CREATE INDEX IF NOT EXISTS idx_chat_history_session_id
-    ON chat_history (session_id);
-"""
+from rag.db import Database
+from rag.models import ChatMessage
 
 
 def _title_from_message(message: str, max_len: int = 60) -> str:
@@ -21,98 +13,93 @@ def _title_from_message(message: str, max_len: int = 60) -> str:
     return f"{text[: max_len - 1]}…"
 
 
+def _parse_session_id(session_id: str) -> uuid.UUID:
+    return uuid.UUID(session_id)
+
+
 class ChatHistoryStore:
     def __init__(self, database_url: str) -> None:
-        self.database_url = database_url
-        self._conn: psycopg.AsyncConnection | None = None
+        self._db = Database(database_url)
 
     async def connect(self) -> None:
-        self._conn = await psycopg.AsyncConnection.connect(self.database_url)
-        async with self._conn.cursor() as cursor:
-            await cursor.execute(_SCHEMA)
-        await self._conn.commit()
+        await self._db.connect()
 
     async def close(self) -> None:
-        if self._conn is not None:
-            await self._conn.close()
-            self._conn = None
+        await self._db.close()
 
     async def save(self, session_id: str, role: str, content: str) -> None:
-        if self._conn is None:
-            raise RuntimeError("ChatHistoryStore is not connected.")
-
-        async with self._conn.cursor() as cursor:
-            await cursor.execute(
-                """
-                INSERT INTO chat_history (session_id, role, content)
-                VALUES (%s, %s, %s)
-                """,
-                (session_id, role, content),
-            )
-        await self._conn.commit()
+        message = ChatMessage(
+            session_id=_parse_session_id(session_id),
+            role=role,
+            content=content,
+        )
+        async with self._db.session_factory() as session:
+            session.add(message)
+            await session.commit()
 
     async def get_messages(self, session_id: str) -> list[dict[str, str]]:
-        if self._conn is None:
-            raise RuntimeError("ChatHistoryStore is not connected.")
-
-        async with self._conn.cursor() as cursor:
-            await cursor.execute(
-                """
-                SELECT id, role, content, created_at
-                FROM chat_history
-                WHERE session_id = %s
-                ORDER BY id ASC
-                """,
-                (session_id,),
+        parsed_session_id = _parse_session_id(session_id)
+        async with self._db.session_factory() as session:
+            result = await session.scalars(
+                select(ChatMessage)
+                .where(ChatMessage.session_id == parsed_session_id)
+                .order_by(ChatMessage.id.asc())
             )
-            rows = await cursor.fetchall()
+            messages = result.all()
 
         return [
             {
-                "id": str(row[0]),
-                "role": row[1],
-                "content": row[2],
-                "created_at": row[3].isoformat(),
+                "id": str(message.id),
+                "role": message.role,
+                "content": message.content,
+                "created_at": message.created_at.isoformat(),
             }
-            for row in rows
+            for message in messages
         ]
 
     async def list_sessions(self, limit: int = 50) -> list[dict[str, str]]:
-        if self._conn is None:
-            raise RuntimeError("ChatHistoryStore is not connected.")
-
-        async with self._conn.cursor() as cursor:
-            await cursor.execute(
-                """
-                SELECT
-                    session_id,
-                    COUNT(*) AS message_count,
-                    MIN(created_at) AS started_at,
-                    MAX(created_at) AS updated_at,
-                    (
-                        SELECT content
-                        FROM chat_history first_msg
-                        WHERE first_msg.session_id = grouped.session_id
-                          AND first_msg.role = 'user'
-                        ORDER BY first_msg.id ASC
-                        LIMIT 1
-                    ) AS title
-                FROM chat_history grouped
-                GROUP BY session_id
-                ORDER BY updated_at DESC
-                LIMIT %s
-                """,
-                (limit,),
+        async with self._db.session_factory() as session:
+            grouped = await session.execute(
+                select(
+                    ChatMessage.session_id,
+                    func.count(ChatMessage.id).label("message_count"),
+                    func.min(ChatMessage.created_at).label("started_at"),
+                    func.max(ChatMessage.created_at).label("updated_at"),
+                )
+                .group_by(ChatMessage.session_id)
+                .order_by(func.max(ChatMessage.created_at).desc())
+                .limit(limit)
             )
-            rows = await cursor.fetchall()
+            rows = grouped.all()
 
-        return [
-            {
-                "session_id": str(row[0]),
-                "message_count": str(row[1]),
-                "started_at": row[2].isoformat(),
-                "updated_at": row[3].isoformat(),
-                "title": _title_from_message(row[4] or "Chat"),
-            }
-            for row in rows
-        ]
+            summaries: list[dict[str, str]] = []
+            for row in rows:
+                title = await session.scalar(
+                    select(ChatMessage.content)
+                    .where(
+                        ChatMessage.session_id == row.session_id,
+                        ChatMessage.role == "user",
+                    )
+                    .order_by(ChatMessage.id.asc())
+                    .limit(1)
+                )
+                summaries.append(
+                    {
+                        "session_id": str(row.session_id),
+                        "message_count": str(row.message_count),
+                        "started_at": row.started_at.isoformat(),
+                        "updated_at": row.updated_at.isoformat(),
+                        "title": _title_from_message(title or "Chat"),
+                    }
+                )
+
+        return summaries
+
+    async def delete_session(self, session_id: str) -> bool:
+        parsed_session_id = _parse_session_id(session_id)
+        async with self._db.session_factory() as session:
+            result = await session.execute(
+                delete(ChatMessage).where(ChatMessage.session_id == parsed_session_id)
+            )
+            await session.commit()
+            return result.rowcount > 0
